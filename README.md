@@ -7,7 +7,7 @@
 <br />
 <p align="center">
   <img src="https://www.tools4ever.nl/connector-logos/eduarte-logo.png" width="500">
-</p>
+</p> 
 
 ## Table of contents
 

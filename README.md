@@ -1,13 +1,14 @@
+
 # HelloID-Conn-Prov-Target-Eduarte-Student
 > :warning: <b> This connector is not tested with HelloID or with a Eduarte environment! </b>
 
 | :information_source: Information |
 |:---------------------------|
 | This repository contains the connector and configuration code only. The implementer is responsible to acquire the connection details such as username, password, certificate, etc. You might even need to sign a contract or agreement with the supplier before implementing this connector. Please contact the client's application manager to coordinate the connector requirements. |
-<br />
+
 <p align="center">
-  <img src="https://www.tools4ever.nl/connector-logos/eduarte-logo.png" width="500">
-</p> 
+  <img src="https://www.eduarte.nl/wp-content/uploads/2018/06/eduarte-logo.png">
+  </p>
 
 ## Table of contents
 
@@ -30,14 +31,11 @@ The following lifecycle events are available:
 
 | Event  | Description | Notes |
 |---	 |---	|---	|
-| create.ps1 | Correlate an Account and update Mail (and Username) |  *Username is not implemented due to uncertainty in the Webservice* |
-| update.ps1 | Create.ps1 script can be used | - |
-| enable.ps1 | n/a | - |
-| disable.ps1 | n/a | - |
+| create.ps1 | Create-correlate, update-correlate and correlate an Account and update Mail (and Username) |  *Username is not implemented due to uncertainty in the Webservice* |
+| update.ps1 | Update the Account | - |
+| enable.ps1 | Enable the Account | - |
+| disable.ps1 | Disable the Account | - |
 | delete.ps1 | n/a | - |
-
-
-
 
 ## Getting started
 
@@ -53,10 +51,12 @@ The following settings are required to connect to the API.
 ### Prerequisites
 -
 ### Remarks
-- This connector only correlates a HelloID person with a Student account in Eduarte and updates the EmailAddress, and probably the username but how must be verified during implementation.
+- This update in this connector only updates the EmailAddress, 
+and probably the username but how must be verified during implementation.
 - The property email does not exist as a fixed property on the student object. I have made an assumption about where to find it. During implementation, it still needs to be verified. It is used to check whether an update needs to take place or not.
-- The Create.ps1 script contains several To-do comments. Please look into these statements during implementation.
+- The scripts contains several To-do comments. Please look into these statements during implementation.
 - There is no Username Property present in de Deelnemers WSDL, We must look into this. The UMRA (Paid service) Does contain a Username property. This can be verified with a working test environment.
+- When adding properties don't forget to also add them to the compare in the update script.
 
 ## Setup the connector
 
@@ -66,7 +66,7 @@ The following settings are required to connect to the API.
 
 > _For more information on how to configure a HelloID PowerShell connector, please refer to our [documentation](https://docs.helloid.com/hc/en-us/articles/360012558020-Configure-a-custom-PowerShell-target-system) pages_
 
-> _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com/forum/helloid-connectors/provisioning/1364-helloid-conn-prov-target-eduarte-student#post1364)_
+> _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com)_
 
 ## HelloID docs
 

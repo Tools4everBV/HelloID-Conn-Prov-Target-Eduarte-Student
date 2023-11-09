@@ -1,22 +1,19 @@
 #################################################
-# HelloID-Conn-Prov-Target-Eduarte-Student-Create
+# HelloID-Conn-Prov-Target-Eduarte-Student-update
 #
 # Version: 1.0.0
 #################################################
 # Initialize default values
 $config = $configuration | ConvertFrom-Json
 $p = $person | ConvertFrom-Json
+$aRef = $AccountReference | ConvertFrom-Json
 $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-# Account mapping
 $account = [PSCustomObject]@{
     ExternalId   = $p.ExternalId
     UserName     = $p.UserName
     EmailAddress = $p.Contact.Business.Email
-
-    # Todo Generate password function
-    Password     = "Password!"
 }
 
 # Enable TLS1.2
@@ -91,19 +88,17 @@ function Add-XmlElement {
 }
 #endregion
 
-# Begin
 try {
-    # Verify if [account.ExternalId] has a value
-    if ([string]::IsNullOrEmpty($($account.ExternalId))) {
-        throw 'Mandatory attribute [account.ExternalId] is empty. Please make sure it is correctly mapped'
+    if ([string]::IsNullOrEmpty($($aRef))) {
+        throw 'The account reference could not be found'
     }
 
     # Get Student XML call
     [xml]$getStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
-        <soapenv:Header/>
-        <soapenv:Body>
-        <api:getDeelnemer/>
-        </soapenv:Body>
+            <soapenv:Header/>
+            <soapenv:Body>
+            <api:getDeelnemer/>
+            </soapenv:Body>
     </soapenv:Envelope>'
     $getDeelnemerElement = $getStudent.envelope.body.ChildNodes | Where-Object { $_.LocalName -eq 'getDeelnemer' }
     $getDeelnemerElement | Add-XmlElement -ElementName 'apiSleutel' -ElementValue "$($config.ApiKey)"
@@ -117,63 +112,37 @@ try {
     }
     $responseStudent = Invoke-RestMethod @splatGetStudent -Verbose:$false
 
-    # Todo: Check if correlation condition works as expected
-    if ($null -eq $responseStudent) {
-        $action = 'Create-Correlate'
-    }
-    elseif ($config.updatePersonOnCorrelate -eq $true) {
-        $action = 'Update-Correlate'
-    }
-    else {
-        $action = 'Correlate'
+    # Verify if the account must be updated
+    # Todo change update check to your needs
+    # Todo: Check if the email adres can be found in the [contactgegevens]
+    $propertiesChanged = $false
+    $mailProperty = $responseStudent.contactgegevens.contactgegeven | Where-Object { $_.soort.naam -eq 'mail' }
+    
+    if (($responseStudent.username -ne $account.username) -or ($responseStudent.EmailAddress -ne $account.EmailAddress) -or ((-not [string]::IsNullOrEmpty($account.EmailAddress)) -and ($mailProperty.contactgegeven -ne $account.EmailAddress))) {
+        $propertiesChanged = $true
     }
 
-    # Add a warning message showing what will happen during enforcement
+    if ($propertiesChanged) {
+        $action = 'Update'
+        $dryRunMessage = 'Update Eduarte-Student account for: [$($p.DisplayName)] will be executed during enforcement'
+    } elseif ((-not ($propertiesChanged) -And ($responseStudent))) {
+        $action = 'NoChanges'
+        $dryRunMessage = 'No changes will be made to the account during enforcement'
+    } elseif ($null -eq $responseStudent) {
+        $action = 'NotFound'
+        $dryRunMessage = "Eduarte-Student account for: [$($p.DisplayName)] not found. Possibly deleted"
+    }
+
+    # Add an auditMessage showing what will happen during enforcement
     if ($dryRun -eq $true) {
-        Write-Warning "[DryRun] $action Eduarte-Student account for: [$($p.DisplayName)], will be executed during enforcement"
+        $auditLogs.Add([PSCustomObject]@{
+                Message = $dryRunMessage
+            })
     }
 
-    # Process
     if (-not($dryRun -eq $true)) {
         switch ($action) {
-            'Create-Correlate' {
-                [xml]$createStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
-                    <soapenv:Header/>
-                    <soapenv:Body>
-                    <api:createDeelnemerGebruiker>
-                        <apiSleutel>X</apiSleutel>
-                    </api:createDeelnemerGebruiker>
-                    </soapenv:Body>
-                </soapenv:Envelope>'
-
-                $createStudent.envelope.body.createDeelnemerGebruiker.apiSleutel = "$($config.ApiKey)"
-                
-                $updateElement = $createStudent.envelope.body.createDeelnemerGebruiker
-                $updateElement | Add-XmlElement -ElementName 'deelnemerNummer' -ElementValue "$($account.ExternalId)"
-                $updateElement | Add-XmlElement -ElementName 'gebruikersnaam' -ElementValue "$($account.UserName)"
-                $updateElement | Add-XmlElement -ElementName 'wachtwoord' -ElementValue "$($account.Password)"
-
-                # Todo Email is an optional field, check if property needs to be set and what happends when $account.EmailAddress is empty
-                $updateElement | Add-XmlElement -ElementName 'emailadres' -ElementValue "$($account.EmailAddress)"
-
-                $splatCreateStudent = @{
-                    Method      = 'Post'
-                    Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/gebruikers"
-                    ContentType = "text/xml" 
-                    Body        = $createStudent.InnerXml
-                }
-
-                # Todo: Check possible the response!
-                $null = Invoke-RestMethod @splatCreateStudent -Verbose:$false 
-
-                $accountReference = $account.ExternalId
-                $auditLogs.Add([PSCustomObject]@{
-                        Message = "Create account was successful. AccountReference is: [$accountReference]"
-                        IsError = $false
-                    })
-            }
-
-            'Update-Correlate' {
+            'Update' {
                 [xml]$setStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
                     <soapenv:Header/>
                     <soapenv:Body>
@@ -194,17 +163,13 @@ try {
                 $updateElement | Add-XmlElement -ElementName 'apiSleutel' -ElementValue "$($config.ApiKey)"
                 $updateElement | Add-XmlElement -ElementName 'deelnemerNummer' -ElementValue "$($account.ExternalId)"
 
-                # Todo: Check if the email adres can be found in the [contactgegevens]
-                $mailProperty = $responseStudent.contactgegevens.contactgegeven | Where-Object { $_.soort.naam -eq 'mail' }
-                if ((-not [string]::IsNullOrEmpty($account.EmailAddress)) -and ($mailProperty.contactgegeven -ne $account.EmailAddress)) {
-                    $updateElement.contactgegeven.contactgegeven = "$($account.EmailAddress)"
-                    $updateRequired = $true
-                }
+                $updateElement.contactgegeven.contactgegeven = "$($account.EmailAddress)"
+
+                # Todo fill these properties with the correct value or remove them.
+                $updateElement.contactgegeven.contactgegeven.soort.code = ""
+                $updateElement.contactgegeven.contactgegeven.soort.naam = ""
 
                 # Todo: Check deelnemerNummer location
-                $accountReference = $responseStudent.deelnemerNummer
-
-                if ($updateRequired) {
                     $splatSetStudent = @{
                         Method      = 'Post'
                         Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers"
@@ -215,33 +180,30 @@ try {
                     # Todo: Check possible the response!
                     $null = Invoke-RestMethod @splatSetStudent -Verbose:$false
 
-
+                    $success = $true
                     $auditLogs.Add([PSCustomObject]@{
-                            Message = "Update account was successful. AccountReference is: [$accountReference]"
+                            Message = "Update account was successful."
                             IsError = $false
                         })
-                }
-                else {
-                    $auditLogs.Add([PSCustomObject]@{
-                            Message = "No Update account required. AccountReference is: [$accountReference]"
-                            IsError = $false
-                        })
-                }
                 break
-            }
-            'correlate' {
-                Write-Verbose 'Correlating Eduarte student'
-                $accountReference = $responseStudent.deelnemerNummer
-                break
-            }
+            }'NoChanges' {
+                Write-Verbose "No changes to Eduarte-Student account with accountReference: [$($aRef)]"
 
-            
+                $success = $true
+                $auditLogs.Add([PSCustomObject]@{
+                    Message = "No changes will be made to the Eduarte-Student account with accountReference: [$($aRef)]"
+                    IsError = $false
+                })
+                break
+            }'NotFound' {
+                $success = $false
+                $auditLogs.Add([PSCustomObject]@{
+                    Message = "Eduarte-Student account for: [$($p.DisplayName)] not found. Possibly deleted"
+                    IsError = $true
+                })
+                break
+            }
         }
-        $success = $true
-        $auditLogs.Add([PSCustomObject]@{
-                Message = "$action account was successful. AccountReference is: [$($accountReference)]"
-                IsError = $false
-            })
     }
 }
 catch {
@@ -250,11 +212,11 @@ catch {
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-Eduarte-StudentError -ErrorObject $ex
-        $auditMessage = "Could not $action Eduarte-Student account. Error: $($errorObj.FriendlyMessage)"
+        $auditMessage = "Could not Update Eduarte-Student account. Error: $($errorObj.FriendlyMessage)"
         Write-Verbose "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
     }
     else {
-        $auditMessage = "Could not $action Eduarte-Student account. Error: $($ex.Exception.Message)"
+        $auditMessage = "Could not Update Eduarte-Student account. Error: $($ex.Exception.Message)"
         Write-Verbose "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
     $auditLogs.Add([PSCustomObject]@{
@@ -265,10 +227,9 @@ catch {
 }
 finally {
     $result = [PSCustomObject]@{
-        Success          = $success
-        AccountReference = $accountReference
-        Auditlogs        = $auditLogs
-        Account          = $account
+        Success   = $success
+        Account   = $account
+        Auditlogs = $auditLogs
     }
     Write-Output $result | ConvertTo-Json -Depth 10
 }

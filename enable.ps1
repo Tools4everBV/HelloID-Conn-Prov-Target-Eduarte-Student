@@ -1,7 +1,7 @@
 #################################################
 # HelloID-Conn-Prov-Target-Eduarte-Student-Enable
 #
-# Version: 1.0.0
+# Version: 1.0.1
 #################################################
 # Initialize default values
 $config = $configuration | ConvertFrom-Json
@@ -90,66 +90,72 @@ try {
     [xml]$getStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
         <soapenv:Header/>
         <soapenv:Body>
-        <api:getDeelnemer/>
+        <api:getDeelnemer>
+            <!--Optional:-->
+            <apiSleutel>?</apiSleutel>
+            <deelnemernummer>?</deelnemernummer>
+        </api:getDeelnemer>
         </soapenv:Body>
-    </soapenv:Envelope>'
-    $getDeelnemerElement = $getStudent.envelope.body.ChildNodes | Where-Object { $_.LocalName -eq 'getDeelnemer' }
-    $getDeelnemerElement | Add-XmlElement -ElementName 'apiSleutel' -ElementValue "$($config.ApiKey)"
-    $getDeelnemerElement | Add-XmlElement -ElementName 'deelnemernummer' -ElementValue "$($aRef)"
+    </soapenv:Envelope>
+    '
+
+    $getStudent.Envelope.Body.getDeelnemer.apiSleutel = $config.apiKey
+    $getStudent.Envelope.Body.getDeelnemer.deelnemernummer = $aref
 
     $splatGetStudent = @{
-        Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers" 
-        Method      = 'Post'
-        ContentType = "text/xml" 
-        Body        = $getStudent.InnerXml
+        Uri             = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers" 
+        Method          = 'POST'
+        Body            = $getStudent.InnerXml
+        ContentType     = 'text/xml; charset=utf-8'
+        UseBasicParsing = $true
     }
-    $responseStudent = Invoke-RestMethod @splatGetStudent -Verbose:$false
+    $rawResponse = Invoke-RestMethod @splatGetStudent -Verbose:$true
 
-    if ($null -eq $responseStudent) {
+    $responseStudent = ([xml]$rawResponse).Envelope.body.getDeelnemerResponse.deelnemer
+
+    $userFound = $responseStudent.gebruikersNaam
+
+    if ([string]::isNullOrEmpty($userFound)) {
         throw "Student [$($aRef)] not found."
     }
 
-
     # Add an auditMessage showing what will happen during enforcement
     if ($dryRun -eq $true) {
-        $auditLogs.Add([PSCustomObject]@{
-                Message = "Enable Eduarte-Student account for: [$($p.DisplayName)] will be executed during enforcement"
-            })
+        write-warning "[Dryrun] Enable Eduarte-Student account for: [$($p.DisplayName)] will be executed during enforcement"
     }
 
-    if (-not($dryRun -eq $true)) {
-        Write-Verbose "Enabling Eduarte-Student account with accountReference: [$aRef]"
+    Write-Verbose "Enabling Eduarte-Student account with accountReference: [$aRef]"
 
-        # Enable Student XML call
-        [xml]$enableStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
+    # Enable Student XML call
+    [xml]$enableStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
             <soapenv:Header/>
             <soapenv:Body>
             <api:activeerGebruiker>
-                <apiSleutel>X</apiSleutel>
+                <apiSleutel>?</apiSleutel>
+                <gebruikernaam>?</gebruikernaam>
             </api:activeerGebruiker>
             </soapenv:Body>
         </soapenv:Envelope>' 
 
-        $enableStudent.envelope.body.activeerGebruiker.apiSleutel = "$($config.ApiKey)"
+    $enableStudent.envelope.body.activeerGebruiker.apiSleutel = "$($config.ApiKey)"
+    $enableStudent.envelope.body.activeerGebruiker.gebruikernaam = $responseStudent.gebruikersNaam
 
-        $updateElement = $enableStudent.envelope.body.activeerGebruiker
-        # Todo check if the resultStudent.gebruikersnaam is the correct way of retrieving the username 
-        $updateElement | Add-XmlElement -ElementName 'gebruikernaam' -ElementValue "$($responseStudent.gebruikernaam)"
-
-        $splatEnableStudent = @{
-            Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/gebruikers" 
-            Method      = 'Post'
-            ContentType = "text/xml" 
-            Body        = $enableStudent.InnerXml
-        }
-        $responseStudent = Invoke-RestMethod @splatEnableStudent -Verbose:$false
-
-        $success = $true
-        $auditLogs.Add([PSCustomObject]@{
-                Message = 'Enable account was successful'
-                IsError = $false
-            })
+    $splatEnableStudent = @{
+        Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/gebruikers" 
+        Method      = 'Post'
+        ContentType = "text/xml" 
+        Body        = $enableStudent.InnerXml
     }
+    if (-not($dryRun -eq $true)) {
+        $responseStudent = Invoke-RestMethod @splatEnableStudent -Verbose:$false
+    }
+
+    $success = $true
+    $auditLogs.Add([PSCustomObject]@{
+            Message = 'Enable account was successful'
+            IsError = $false
+        })
+    
 }
 catch {
     $success = $false

@@ -1,6 +1,5 @@
 
 # HelloID-Conn-Prov-Target-Eduarte-Student
-> :warning: <b> This connector is not tested with HelloID or with a Eduarte environment! </b>
 
 | :information_source: Information |
 |:---------------------------|
@@ -50,11 +49,11 @@ The following settings are required to connect to the API.
 
 ### Prerequisites
 -
+
 ### Remarks
 - This update in this connector only updates the EmailAddress, 
 and probably the username but how must be verified during implementation.
-- The property email does not exist as a fixed property on the student object. I have made an assumption about where to find it. During implementation, it still needs to be verified. It is used to check whether an update needs to take place or not.
-- The scripts contains several To-do comments. Please look into these statements during implementation.
+- The property email does not exist as a fixed property on a update or student-GET. The "soort" may differ per implementation and can be set in the configuration.
 - There is no Username Property present in de Deelnemers WSDL, We must look into this. The UMRA (Paid service) Does contain a Username property. This can be verified with a working test environment.
 - When adding properties don't forget to also add them to the compare in the update script.
 

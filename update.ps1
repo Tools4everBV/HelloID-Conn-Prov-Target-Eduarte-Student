@@ -1,20 +1,15 @@
 #################################################
 # HelloID-Conn-Prov-Target-Eduarte-Student-update
 #
-# Version: 1.0.0
+# Version: 1.0.1
 #################################################
 # Initialize default values
 $config = $configuration | ConvertFrom-Json
 $p = $person | ConvertFrom-Json
 $aRef = $AccountReference | ConvertFrom-Json
+
 $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-$account = [PSCustomObject]@{
-    ExternalId   = $p.ExternalId
-    UserName     = $p.UserName
-    EmailAddress = $p.Contact.Business.Email
-}
 
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
@@ -93,65 +88,85 @@ try {
         throw 'The account reference could not be found'
     }
 
+    # Account mapping
+    $account = [PSCustomObject]@{
+        ExternalId   = $p.ExternalId
+        UserName     = $p.Accounts.ActiveDirectory.samaccountname
+        Contactgegeven = @{
+            Contactgegeven = $p.Accounts.ActiveDirectory.mail
+            soort = $config.ContactgegevenSoort
+            naam = $config.contactgegevenNaam
+        }
+    }    
+
     # Get Student XML call
     [xml]$getStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
-            <soapenv:Header/>
-            <soapenv:Body>
-            <api:getDeelnemer/>
-            </soapenv:Body>
-    </soapenv:Envelope>'
-    $getDeelnemerElement = $getStudent.envelope.body.ChildNodes | Where-Object { $_.LocalName -eq 'getDeelnemer' }
-    $getDeelnemerElement | Add-XmlElement -ElementName 'apiSleutel' -ElementValue "$($config.ApiKey)"
-    $getDeelnemerElement | Add-XmlElement -ElementName 'deelnemernummer' -ElementValue "$($account.ExternalId)"
+        <soapenv:Header/>
+        <soapenv:Body>
+        <api:getDeelnemer>
+            <!--Optional:-->
+            <apiSleutel>?</apiSleutel>
+            <deelnemernummer>?</deelnemernummer>
+        </api:getDeelnemer>
+        </soapenv:Body>
+    </soapenv:Envelope>
+    '
+
+    $getStudent.Envelope.Body.getDeelnemer.apiSleutel = $config.apiKey
+    $getStudent.Envelope.Body.getDeelnemer.deelnemernummer = $account.ExternalId
 
     $splatGetStudent = @{
-        Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers" 
-        Method      = 'Post'
-        ContentType = "text/xml" 
-        Body        = $getStudent.InnerXml
+        Uri             = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers" 
+        Method          = 'POST'
+        Body            = $getStudent.InnerXml
+        ContentType     = 'text/xml; charset=utf-8'
+        UseBasicParsing = $true
     }
-    $responseStudent = Invoke-RestMethod @splatGetStudent -Verbose:$false
+    $rawResponse = Invoke-RestMethod @splatGetStudent -Verbose:$true
+
+    $responseStudent = ([xml]$rawResponse).Envelope.body.getDeelnemerResponse.deelnemer
 
     # Verify if the account must be updated
     # Todo change update check to your needs
     # Todo: Check if the email adres can be found in the [contactgegevens]
     $propertiesChanged = $false
-    $mailProperty = $responseStudent.contactgegevens.contactgegeven | Where-Object { $_.soort.naam -eq 'mail' }
-    
-    if (($responseStudent.username -ne $account.username) -or ($responseStudent.EmailAddress -ne $account.EmailAddress) -or ((-not [string]::IsNullOrEmpty($account.EmailAddress)) -and ($mailProperty.contactgegeven -ne $account.EmailAddress))) {
+    $currentMailProperty = ($responseStudent.contactgegevens.contactgegeven | where-object { $_.soort.code -eq $account.Contactgegeven.soort }).contactgegeven
+    Write-Verbose -Verbose "$($currentMailProperty)"
+    if (($responseStudent.gebruikersNaam -ne $account.username) -or ($currentMailProperty -ne $account.Contactgegeven.contactgegeven) -or ((-not [string]::IsNullOrEmpty($account.Contactgegeven.contactgegeven)) -and ($currentMailProperty -ne $account.Contactgegeven.contactgegeven))) {
         $propertiesChanged = $true
     }
 
     if ($propertiesChanged) {
         $action = 'Update'
-        $dryRunMessage = 'Update Eduarte-Student account for: [$($p.DisplayName)] will be executed during enforcement'
-    } elseif ((-not ($propertiesChanged) -And ($responseStudent))) {
+        $dryRunMessage = "Update Eduarte-Student account for: [$($p.DisplayName)] will be executed during enforcement"
+    }
+    elseif ((-not ($propertiesChanged) -And ($responseStudent))) {
         $action = 'NoChanges'
-        $dryRunMessage = 'No changes will be made to the account during enforcement'
-    } elseif ($null -eq $responseStudent) {
+        $dryRunMessage = "No changes will be made to the account during enforcement"
+    }
+    elseif ($null -eq $responseStudent) {
         $action = 'NotFound'
         $dryRunMessage = "Eduarte-Student account for: [$($p.DisplayName)] not found. Possibly deleted"
     }
 
     # Add an auditMessage showing what will happen during enforcement
     if ($dryRun -eq $true) {
-        $auditLogs.Add([PSCustomObject]@{
-                Message = $dryRunMessage
-            })
-    }
+        write-warning "[DRYRUN] $dryRunMessage"
 
-    if (-not($dryRun -eq $true)) {
-        switch ($action) {
-            'Update' {
-                [xml]$setStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
+    }
+    switch ($action) {
+        'Update' {
+            [xml]$setStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
                     <soapenv:Header/>
                     <soapenv:Body>
                     <api:updateContactgegevens>
+                        <apiSleutel>?</apiSleutel>
+                        <deelnemerNummer>?</deelnemerNummer>
                         <contactgegeven>
-                            <contactgegeven>xxx</contactgegeven>
+                            <contactgegeven>?</contactgegeven>
                             <soort>
-                                <code>X</code>
-                                <naam>X</naam>
+                                <code>?</code>
+                                <naam>?</naam>
                             </soort>
                             <geheim>false</geheim>
                         </contactgegeven>
@@ -159,52 +174,58 @@ try {
                     </soapenv:Body>
                 </soapenv:Envelope>'
 
-                $updateElement = $setStudent.envelope.body.updateContactgegevens
-                $updateElement | Add-XmlElement -ElementName 'apiSleutel' -ElementValue "$($config.ApiKey)"
-                $updateElement | Add-XmlElement -ElementName 'deelnemerNummer' -ElementValue "$($account.ExternalId)"
 
-                $updateElement.contactgegeven.contactgegeven = "$($account.EmailAddress)"
 
-                # Todo fill these properties with the correct value or remove them.
-                $updateElement.contactgegeven.contactgegeven.soort.code = ""
-                $updateElement.contactgegeven.contactgegeven.soort.naam = ""
+            $currentMailProperty = ($responseStudent.contactgegevens.contactgegeven | where-object { $_.soort.code -eq $account.contactgegeven.soort }).contactgegeven
 
-                # Todo: Check deelnemerNummer location
-                    $splatSetStudent = @{
-                        Method      = 'Post'
-                        Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers"
-                        ContentType = "text/xml" 
-                        Body        = $setStudent.InnerXml
-                    }
+            $setStudent.envelope.body.updateContactgegevens.apiSleutel = "$($config.ApiKey)"
+            $setStudent.envelope.body.updateContactgegevens.deelnemernummer = "$($account.ExternalId)"
+            $setStudent.envelope.body.updateContactgegevens.contactgegeven.contactgegeven = $account.Contactgegeven.Contactgegeven
+            $setStudent.envelope.body.updateContactgegevens.contactgegeven.soort.code = $account.contactgegeven.soort
+            $setStudent.envelope.body.updateContactgegevens.contactgegeven.soort.naam = $account.contactgegeven.naam
 
-                    # Todo: Check possible the response!
-                    $null = Invoke-RestMethod @splatSetStudent -Verbose:$false
+            # Todo: Check deelnemernummer location
+            $accountReference = $responseStudent.deelnemernummer
+            
+            $splatSetStudent = @{
+                Method      = 'Post'
+                Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers"
+                ContentType = "text/xml" 
+                Body        = $setStudent.InnerXml
+            }
 
-                    $success = $true
-                    $auditLogs.Add([PSCustomObject]@{
-                            Message = "Update account was successful."
-                            IsError = $false
-                        })
-                break
-            }'NoChanges' {
-                Write-Verbose "No changes to Eduarte-Student account with accountReference: [$($aRef)]"
+            # Todo: Check possible the response!
+            if (-not($dryRun -eq $true)) {
+                $response = Invoke-RestMethod @splatSetStudent -Verbose:$false
+                        
+                $responsemessage = $response.Envelope.body.updateContactgegevensResponse.updateContactgegevensResponse
+                Write-Verbose -Verbose "response $($responsemessage.status) - $($responsemessage.melding)"
+            }
 
-                $success = $true
-                $auditLogs.Add([PSCustomObject]@{
+            $success = $true
+            $auditLogs.Add([PSCustomObject]@{
+                    Message = "Update account was successful."
+                    IsError = $false
+                })
+            break
+        }'NoChanges' {
+            Write-Verbose "No changes to Eduarte-Student account with accountReference: [$($aRef)]"
+            $success = $true
+            $auditLogs.Add([PSCustomObject]@{
                     Message = "No changes will be made to the Eduarte-Student account with accountReference: [$($aRef)]"
                     IsError = $false
                 })
-                break
-            }'NotFound' {
-                $success = $false
-                $auditLogs.Add([PSCustomObject]@{
+            break
+        }'NotFound' {
+            $success = $false
+            $auditLogs.Add([PSCustomObject]@{
                     Message = "Eduarte-Student account for: [$($p.DisplayName)] not found. Possibly deleted"
                     IsError = $true
                 })
-                break
-            }
+            break
         }
     }
+    
 }
 catch {
     $success = $false

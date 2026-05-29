@@ -1,0 +1,71 @@
+{
+  "Version": "v1",
+  "MappingFields": [
+    {
+      "Name": "deelnemerNummer",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create"
+          ],
+          "MappingMode": "Field",
+          "Value": "\"Person.ExternalId\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "gebruikersnaam",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"function getUserPrincipalName() {\\r\\n    let upn = '';\\r\\n\\r\\n    if (typeof Person.Accounts.MicrosoftActiveDirectory.userPrincipalName !== 'undefined' && Person.Accounts.MicrosoftActiveDirectory.userPrincipalName) {\\r\\n        upn = Person.Accounts.MicrosoftActiveDirectory.userPrincipalName;\\r\\n    }\\r\\n\\r\\n    return upn;\\r\\n}\\r\\n\\r\\ngetUserPrincipalName()\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "emailadres",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"function getEmail() {\\r\\n    let mail = '';\\r\\n\\r\\n    if (typeof Person.Accounts.MicrosoftActiveDirectory.mail !== 'undefined' && Person.Accounts.MicrosoftActiveDirectory.mail) {\\r\\n        mail = Person.Accounts.MicrosoftActiveDirectory.mail;\\r\\n    }\\r\\n\\r\\n    return mail;\\r\\n}\\r\\n\\r\\ngetEmail()\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "wachtwoord",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"// generatePasswordOption1.js [https://github.com/Tools4everBV/HelloID-Lib-Prov-HelperFunctions/blob/master/Javascript/Target/Password/Scripts/generatePasswordOption1.js]\\r\\n//\\r\\n// Helper function to shuffle an array\\r\\nfunction randomizeCharSequence(passwordObject) {\\r\\n    for (let j, x, i = passwordObject.length; i; j = Math.floor(Math.random() * i), x = passwordObject[--i], passwordObject[i] = passwordObject[j], passwordObject[j] = x);\\r\\n    return passwordObject;\\r\\n}\\r\\n\\r\\nfunction generatePassword() {\\r\\n    // Initialize these variables for the algorithm to meet your password complexity rules\\r\\n    const passwordLength = 8;\\r\\n    const minUpper = 1;\\r\\n    const maxUpper = 3;\\r\\n    const minNumeric = 0;\\r\\n    const maxNumeric = 2;\\r\\n    const minSpecial = 1;\\r\\n    const maxSpecial = 1;\\r\\n\\r\\n    // Character sets\\r\\n    const upperChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';\\r\\n    const lowerChars = 'abcdefghijklmnopqrstuvwxyz';\\r\\n    const numberChars = '0123456789';\\r\\n    const specialChars = '!#$@*?';\\r\\n\\r\\n    // Do not change any code below this line !!!\\r\\n\\r\\n    // Helper function to get a random character from a set\\r\\n    const getRandomValue = (values) => values.charAt(Math.floor(Math.random() * values.length));\\r\\n\\r\\n    // Generate individual character groups\\r\\n    const numberUpper = Math.floor(Math.random() * (maxUpper - minUpper + 1)) + minUpper;\\r\\n    const numberNumeric = Math.floor(Math.random() * (maxNumeric - minNumeric + 1)) + minNumeric;\\r\\n    const numberSpecial = Math.floor(Math.random() * (maxSpecial - minSpecial + 1)) + minSpecial;\\r\\n    const numberLower = passwordLength - (numberUpper + numberNumeric + numberSpecial);\\r\\n\\r\\n    const numericGroup = Array.from({ length: numberNumeric }, () => getRandomValue(numberChars));\\r\\n    const upperGroup = Array.from({ length: numberUpper }, () => getRandomValue(upperChars));\\r\\n    const specialGroup = Array.from({ length: numberSpecial }, () => getRandomValue(specialChars));\\r\\n    const lowerGroup = Array.from({ length: numberLower }, () => getRandomValue(lowerChars));\\r\\n\\r\\n    // Combine all groups and shuffle the order\\r\\n    const password = randomizeCharSequence([...numericGroup, ...upperGroup, ...specialGroup, ...lowerGroup]);\\r\\n\\r\\n    return password.join('');\\r\\n}\\r\\n\\r\\ngeneratePassword();\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    }
+  ],
+  "UniqueFieldNames": []
+}

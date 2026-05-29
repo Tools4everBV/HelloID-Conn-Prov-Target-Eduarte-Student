@@ -21,17 +21,7 @@
     }
   },
   {
-    "key": "updatePersonOnCorrelate",
-    "type": "checkbox",
-    "defaultValue": false,
-    "templateOptions": {
-      "label": "Update Person when correlating",
-      "required": false,
-      "description": "This will update Eduarte Student account in the create action (not just correlate)."
-    }
-  },
-  {
-    "key": "ContactGegevenSoort",
+    "key": "ContactGegevenCode",
     "type": "input",
     "templateOptions": {
       "label": "Code of the 'contactgegeven'",
@@ -48,16 +38,6 @@
       "required": false,
       "placeholder": "E-mail School",
       "description": "This will be used to update the corresponding 'contactgegeven'"
-    }
-  },
-  {
-    "key": "IsDebug",
-    "type": "checkbox",
-    "defaultValue": true,
-    "templateOptions": {
-      "label": "Toggle debug logging",
-      "description": "When toggled, debug logging will be displayed",
-      "required": false
     }
   }
 ]

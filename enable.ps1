@@ -1,23 +1,10 @@
 #################################################
 # HelloID-Conn-Prov-Target-Eduarte-Student-Enable
-#
-# Version: 1.0.1
+# PowerShell V2
 #################################################
-# Initialize default values
-$config = $configuration | ConvertFrom-Json
-$p = $person | ConvertFrom-Json
-$aRef = $AccountReference | ConvertFrom-Json
-$success = $false
-$auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-
-# Set debug logging
-switch ($($config.IsDebug)) {
-    $true { $VerbosePreference = 'Continue' }
-    $false { $VerbosePreference = 'SilentlyContinue' }
-}
 
 #region functions
 function Resolve-Eduarte-StudentError {
@@ -34,58 +21,41 @@ function Resolve-Eduarte-StudentError {
             ErrorDetails     = $ErrorObject.Exception.Message
             FriendlyMessage  = $ErrorObject.Exception.Message
         }
-        # Todo: The error message may need to be neatened for the friendlyerror message
-        if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') {
+        if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-            $httpErrorObj.FriendlyMessage = $ErrorObject.ErrorDetails.Message
         }
-        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException' -and (-not [string]::IsNullOrEmpty($ErrorObject.Exception.Response))) {
-            $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
-            if ( $streamReaderResponse ) {
-                $httpErrorObj.ErrorDetails = $streamReaderResponse
-                $httpErrorObj.FriendlyMessage = $streamReaderResponse
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+            if ($null -ne $ErrorObject.Exception.Response) {
+                $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
+                if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
+                    $httpErrorObj.ErrorDetails = $streamReaderResponse
+                }
             }
+        }
+        try {
+            # Todo: The error message may need to be be changed to show to friendly message
+
+            $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
+            # Make sure to inspect the error result object and add only the error message as a FriendlyMessage.
+            # $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
+            $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails # Temporarily assignment
+        }
+        catch {
+            $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
+            Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
     }
 }
-
-function Add-XmlElement {
-    [CmdletBinding()]
-    param (
-        [Parameter(
-            Mandatory,
-            ValueFromPipeline = $True,
-            Position = 0)]
-        [System.Xml.XmlElement]
-        $XmlParentDocument,
-
-        [Parameter(Mandatory)]
-        [string]
-        $ElementName,
-
-        [Parameter(Mandatory)]
-        [string]
-        [AllowEmptyString()]
-        $ElementValue
-    )
-    process {
-        try {
-            $child = $XmlParentDocument.OwnerDocument.CreateElement($ElementName)
-            $null = $child.InnerText = "$ElementValue"
-            $null = $XmlParentDocument.AppendChild($child)
-        }
-        catch {
-            $PSCmdlet.ThrowTerminatingError($_)
-        }
-    }
-}
 #endregion
+
 try {
-    if ([string]::IsNullOrEmpty($($aRef))) {
+    # Verify if [accountReference] has a value
+    if ([string]::IsNullOrEmpty($($actionContext.References.Account))) {
         throw 'The account reference could not be found'
     }
 
+    Write-Information 'Verifying if a Eduarte-Student account exists'
     # Get Student XML call
     [xml]$getStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
         <soapenv:Header/>
@@ -96,38 +66,33 @@ try {
             <deelnemernummer>?</deelnemernummer>
         </api:getDeelnemer>
         </soapenv:Body>
-    </soapenv:Envelope>
-    '
-
-    $getStudent.Envelope.Body.getDeelnemer.apiSleutel = $config.apiKey
-    $getStudent.Envelope.Body.getDeelnemer.deelnemernummer = $aref
+    </soapenv:Envelope>'
+    
+    $getStudent.Envelope.Body.getDeelnemer.apiSleutel = $actionContext.Configuration.ApiKey
+    $getStudent.Envelope.Body.getDeelnemer.deelnemernummer = $actionContext.References.Account
 
     $splatGetStudent = @{
-        Uri             = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/deelnemers" 
-        Method          = 'POST'
-        Body            = $getStudent.InnerXml
-        ContentType     = 'text/xml; charset=utf-8'
-        UseBasicParsing = $true
+        Uri         = "$($actionContext.Configuration.BaseUrl)/services/api/algemeen/deelnemers" 
+        Method      = 'Post'
+        ContentType = "text/xml; charset=utf-8" 
+        Body        = $getStudent.InnerXml
     }
-    $rawResponse = Invoke-RestMethod @splatGetStudent -Verbose:$true
+    $rawResponse = Invoke-RestMethod @splatGetStudent
+    $correlatedAccount = ([xml]$rawResponse).Envelope.body.getDeelnemerResponse.deelnemer
 
-    $responseStudent = ([xml]$rawResponse).Envelope.body.getDeelnemerResponse.deelnemer
-
-    $userFound = $responseStudent.gebruikersNaam
-
-    if ([string]::isNullOrEmpty($userFound)) {
-        throw "Student [$($aRef)] not found."
+    if (-NOT [string]::isNullOrEmpty($correlatedAccount.gebruikersNaam)) {
+        $lifecycleProcess = 'EnableAccount'
     }
-
-    # Add an auditMessage showing what will happen during enforcement
-    if ($dryRun -eq $true) {
-        write-warning "[Dryrun] Enable Eduarte-Student account for: [$($p.DisplayName)] will be executed during enforcement"
+    else {
+        $lifecycleProcess = 'NotFound'
     }
 
-    Write-Verbose "Enabling Eduarte-Student account with accountReference: [$aRef]"
+    # Process
+    switch ($lifecycleProcess) {
+        'EnableAccount' {
 
-    # Enable Student XML call
-    [xml]$enableStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
+            # Enable Student XML call
+            [xml]$enableStudent = '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:api="http://api.algemeen.webservices.eduarte.topicus.nl/">
             <soapenv:Header/>
             <soapenv:Body>
             <api:activeerGebruiker>
@@ -137,49 +102,59 @@ try {
             </soapenv:Body>
         </soapenv:Envelope>' 
 
-    $enableStudent.envelope.body.activeerGebruiker.apiSleutel = "$($config.ApiKey)"
-    $enableStudent.envelope.body.activeerGebruiker.gebruikernaam = $responseStudent.gebruikersNaam
+            $enableStudent.envelope.body.activeerGebruiker.apiSleutel = "$($actionContext.Configuration.ApiKey)"
+            $enableStudent.envelope.body.activeerGebruiker.gebruikernaam = $correlatedAccount.gebruikersNaam
 
-    $splatEnableStudent = @{
-        Uri         = "$($config.BaseUrl.TrimEnd('/'))/services/api/algemeen/gebruikers" 
-        Method      = 'Post'
-        ContentType = "text/xml" 
-        Body        = $enableStudent.InnerXml
-    }
-    if (-not($dryRun -eq $true)) {
-        $responseStudent = Invoke-RestMethod @splatEnableStudent -Verbose:$false
+            $splatEnableStudent = @{
+                Uri         = "$($actionContext.Configuration.BaseUrl)/services/api/algemeen/gebruikers" 
+                Method      = 'Post'
+                ContentType = "text/xml; charset=utf-8" 
+                Body        = $enableStudent.InnerXml
+            }
+
+            if (-not($actionContext.DryRun -eq $true)) {
+                Write-Information "Enabling Eduarte-Student account with accountReference: [$($actionContext.References.Account)]"
+                $null = Invoke-RestMethod @splatEnableStudent
+            }
+            else {
+                Write-Information "[DryRun] Enable Eduarte-Student account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
+            }
+
+            $outputContext.Success = $true
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = 'Enable account was successful'
+                    IsError = $false
+                })
+            break
+        }
+
+        'NotFound' {
+            Write-Information "Eduarte-Student account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
+            $outputContext.Success = $false
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = "Eduarte-Student account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
+                    IsError = $true
+                })
+            break
+        }
     }
 
-    $success = $true
-    $auditLogs.Add([PSCustomObject]@{
-            Message = 'Enable account was successful'
-            IsError = $false
-        })
-    
-}
+} 
 catch {
-    $success = $false
+    $outputContext.success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-Eduarte-StudentError -ErrorObject $ex
-        $auditMessage = "Could not Enable Eduarte-Student account. Error: $($errorObj.FriendlyMessage)"
-        Write-Verbose "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
+        $auditLogMessage = "Could not enable Eduarte-Student account: [$($actionContext.References.Account)]. Error: $($errorObj.FriendlyMessage)"
+        Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
     }
     else {
-        $auditMessage = "Could not Enable Eduarte-Student account. Error: $($ex.Exception.Message)"
-        Write-Verbose "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
+        $auditLogMessage = "Could not enable Eduarte-Student account: [$($actionContext.References.Account)]. Error: $($_.Exception.Message)"
+        Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
-    $auditLogs.Add([PSCustomObject]@{
-            Message = $auditMessage
+    $outputContext.AuditLogs.Add([PSCustomObject]@{
+            Message = $auditLogMessage
             IsError = $true
         })
-    # End
-}
-finally {
-    $result = [PSCustomObject]@{
-        Success   = $success
-        Auditlogs = $auditLogs
-    }
-    Write-Output $result | ConvertTo-Json -Depth 10
 }
